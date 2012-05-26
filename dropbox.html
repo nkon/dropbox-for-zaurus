@@ -1,0 +1,114 @@
+<HTML>
+<HEAD>
+<TITLE>Zaurus ハマリ道: Dropbox client</TITLE>
+<LINK REL="stylesheet" TYPE="text/css" HREF="../zaurus.css">
+<BODY><img src="/~nkon/cgi-bin/access.cgi" align="right" alt="Under-Construction"><p>
+<a href="../index.html">▲Zaurus Top</a> |
+<a href="../index.html#config">↑Up(設定・システム)</a> |
+<a href="sdhc4g.html">←Prev(4GB以上のSDHCを使う)</a> |
+<a href="">→Next()</a></p>
+<hr>
+
+<h2>Dropbox client for zaurus</h2>
+<p align="right">(2012/05/13)</p>
+
+<p>Dropbox SDK(ruby 版)を使って、zaurus に Dropbox 環境を構築し、メモを同期させ、zaurus をメモマシンとして活用する。</p>
+
+<h3>Dropbox SDK</h3>
+<p><a href="https://www.dropbox.com/developers">Dropbox for Developers</a>のサイトに行くと、Dropbox のAPIを使った開発のためのドキュメントやツールが公開されている。</p>
+<p>アプリのタイプとしては、'App folder' という、Dropbox ディレクトリの下の特定のサブディレクトリ以下しかアクセスできないタイプと 'Full Dropbox' という、全 Dropbox/ 以下にアクセスできるアプリがあり、前者が推奨されている。</p>
+<p>通常、すでに、一般ユーザとしてのドロップボックスアカウントを持っているはずなので、それで、ウェブフォームにログインする。その状態で、<a href="https://www.dropbox.com/developers/apps">My apps</a>ページに行けば、「Create an App」ボタンで、アプリを作ることができる。名前、簡単な説明、アプリタイプをこのときに決めておく必要がある。最初は 'development status' でアプリが作成される。5人以上のユーザにテストしてもらって、Dropbox のレビューが通れば 'Production status'になる。</p>
+<p>認証方法としては OAuth を、データフォーマットとしては JSON を、API としては REST API を使っている。現代では一般的な構成。SDK としては、iOS, Android, Python, Ruby, Java OS X がある。ruby 版しかみていないが、REST API を関数呼び出しに変換するユーティリティの趣き。Dropbox の公用語は Python のはず。</p>
+
+<h3>d4z</h3>
+<p>できあがったものは ipkg にまとめてあるが、これは 'development status' なので、使うためにいろいろと登録作業が必要。</p>
+<ul>
+  <li><a href="../mysoft/drpbx_0.1.1_arm.ipk">drpbx_0.1.1_arm.ipk</a>をダウンロードして、インストールする。</li>
+  <li>OPIE-SH と ruby と OpenSSL が必要なのでどこかで探してくる。私が使っているバージョンは opie-sh_0.5.1-20020527_arm.ipk と ruby_1.7.8-1_arm.ipk と openssl_0.9.6m-1_arm.ipk。ruby_1.7.8 に適合するのは、ruby-qte_0.5.4_arm.ipk と db_4.2.52-2_arm.ipk。</li>
+  <li>ruby のライブラリである、dropbox_sdk.rb, json ライブラリ、oauth ライブラリは同梱されている。zaurus は iconv 関係が壊れているので、json ライブラリを修正してある。副作用として、<strong>日本語ファイル名には対応していない</strong>。</li>
+  <li>ホームディレクトリに d4z_keys.rb というファイルを作る。<pre>
+APP_KEY = 'xxxxxxxxxxxx'
+APP_SECRET = 'xxxxxxxxxxxxs'
+
+ACCESS_TOKEN = ''
+ACCESS_SECRET = ''
+
+# on zaurus
+APP_DIRECTORY = File.expand_path("~/Dropbox/Apps/d4z_test/")
+SERVER_INFO_FILE = File.expand_path("~/d4z.json")
+</pre></li>
+  <li>自分のアカウントでアプリを作る。タイプは 'App Folder'、アプリケーションディレクトリは、設定ファイルに合わせる(~/Dropbox/Apps/ の下にできる)。得られた APP_KEY と APP_SECRET を d4z_keys.rb に記入する。</li>
+  <li>コマンドラインで <T>d4z.rb -i</T>を実行する。ログインが失敗し、Authorize URL が表示される。ウェブブラウザでその URL にアクセスし、ACCESS_TOKEN と ACCESS_SECRET を入手する。得られた値を、d4z_keys.rb に記入する。</li>
+  <li><T>d4z.rb -h</T> を実行するとヘルプが表示される。<pre>
+Usage: d4z [options]
+    -i                               Interructive mode
+    -d                               Download only(from server to local)
+    -u                               Upload only(from local to server)
+    -s                               Syncronus(upload and download)
+        --debug                      Show verbose debug output
+    -h, --help                       Show this message
+    -v, --version                    Show version
+</pre></li>
+  <li>OPIE-SH を使ったクライアント。ipk をインストールすると、アイコンが並ぶ。<img src="dropbox_icon.gif"><br>長押しして、VGAチェックを外す。タップして実行するとダイアログが表示される。<img src="dropbox_dialog.gif"><br>「Down」は、サーバから更新されたファイルをダウンロードする。「Up」は、サーバにアップする。「Sync」はタイムスタンプなども参照して双方向にやりとりする。キャンセルするのは「×」。「OK」は「Down」と同じ。自動的にネットワークに接続して、同期作業を行う。終了すれば、ネットワーク切断の問い合わせダイアログが表示される。</li>
+  <li>croninet.rb を使っているなら、d4z.rb -s をどこかに登録してやれば、半自動で同期される。</li>
+</ul>
+
+<h3>memo</h3>
+<dl>
+  <dt>TODO</dt>
+  <dd><ul>
+      <li>ネットワークの切断に対してロバストになるようにする。</li>
+      <li>更新ファイルの洗い出しアルゴリズムを洗練させてデータ転送量を少なくする。</li>
+  </ul></dd>
+  <dt>ザウルスと iconv と 漢字コード</dt>
+  <dd>ザウルスの付ぃあるシステムは shift-jis が使われている。一般の Unix 環境ではファイルシステムは、今は UTF8 が使われているが、zaurusu が発売された当時は EUC が主流だった。Dropbox のファイル名は、8bit スルーだとどこかに書いてあったが、API で使われる JSON は、UTF8が既定の文字コードのはず。<br>ザウルス発売当時(2003年)は unicode も普及しておらず、ザウルスのシステムが持っている iconv ライブラリは非常に貧弱なものである。ruby にも iconv ライブラリがあるのだが、それはシステムの iconv ライブラリにたいするラッパである。いろいろとシステムの iconv を入れ替えようとこころみたが、ruby も perl もそれ以外の iconv に依存しているものすべて入れ替えなければならないので、諦めた。この dropbox for zaurus では、日本語ファイル名は不可、という仕様で逃げた。</dd>
+  <dt>Dropbox は大文字小文字を区別しない</dt>
+  <dd>小文字に統一する、とかだといいのだがそうではない。重複判定のときに大文字と小文字を区別しない。</dd>
+  <dt>sleep</dt>
+  <dd>opie-sh を使っているシェルスクリプトでは、ダイアルアップしてから d4z.rb を走らせる。WiFi の場合はいいのだが、PHS の場合、インターフェイスがアップしてから、ちゃんとつながるまでに少々時間がかかる。で、その間に sleep を入れたが、ちゃんと指定した秒数を待ってくれない、のではなく、<T>qcop QPE/Network 'connectRequest()'</T> をキックしてから(ダイアル中の時間もあわせて)指定した秒数だけスリープする。多めに sleep しておいたほうが無難だ。というか、インターフェイスがアップしたのを、qcop で確認できるのが一番いい。その次の手段は、d4z.rb 側で、つながるまで待つ。</dd>
+  <dt>GitHub の話</dt>
+  <dd>まだまだ、git と github の概念を理解できていないので、うまく使いこなせていないが、とりあえずアカウントを作った。GUI ツールは gitg を使ってみたが、コマンドラインやウェブヘルプの助けが必要な状態。</dd>
+  <dt>Dropbox のしくみ</dt>
+  <dd>このような共有ストレージ(ウェブタイプではなくファイルシステムをシャドーコピーするタイプ)としての元祖である。<br>
+まずこれは、Y Combinator 案件であるということ。ハッカー精神がその随所に見られる。Linux クライアントを正式にサポートしてあることや、API言語として、python や ruby があることなどからも分かる。<br>
+考え方として、ウェブストレージでも rsync でもなく subversion みたいなもの。だから、ローカルにコピーがあることが基本で、さらに pdumpfs やその類似品と同様に、過去のリビジョンもサーバ上に保管されている。<br>
+そして、コア部分を C で書いておいて、上位機能は python を難読化したバイナリーで実現されている。だから、Linux への移植性にも優れ、API言語として python が使われている。バックエンドは Amazon S3 なので強力だが、コスト面では大手が専用サーバを作るとビハインドを被るかも。前述のコア部分は、バイナリの差分技術だ。<br>
+<a href="http://blog.livedoor.jp/lionfan/archives/52910300.html">参考:ポール・グレアム＆アンドリュー・ヒューストン「Y Combinatorのファンディング応募フォーム」(上)</a>
+  </dd>
+</dl>
+
+<h3>Change Logs</h3>
+<dl>
+  <dt>0.1.1(2012-05-26)</dt>
+  <dd>d4z.rb: ログ出力の多くをデバッグオプションのときのみにした。get_file で、サーバのファイルが無いときに例外が生じるのをレスキューした。<br>-a オプション(サーバ情報をすべて入手する)を追加した。</dd>
+  <dt>0.1.0(2012-05-20)</dt>
+  <dd>d4z.rb: get_info(全情報取得)ではなく delta(差分情報取得)を使うようにした。すべての情報が完璧にやりとりされていればうまくいく。情報欠落があったときのフェールセーフは未実装。</dd>
+  <dt>0.0.2</dt>
+  <dd>drpbx_opie.sh: ネットワーク接続してから d4z.rb が起動するまでに sleep 10 するようにした。<a href="https://github.com/nkon/dropbox-for-zaurus">https://github.com/nkon/dropbox-for-zaurus</a> で公開。</dd>
+  <dt>0.0.1</dt>
+  <dd>初版公開。ページ作成。</dd>
+</dl>
+
+
+<h3>links</h3>
+<p>いろいろとリンクが切れているので、今回のために参考になったリンクを改めて紹介。</p>
+<ul>
+  <li><a href="http://d.hatena.ne.jp/dot_h2o2/20100524/p1">Dropbox API(Ruby用)メモ</a></li>
+  <li><a href="http://d.hatena.ne.jp/shibason/20090809/1249764381">OAuthコンシューマの仕組みと実装 Ruby編</a></li>
+  <li><a href="http://www.focv.com/ipkg/">Private Packages for Sharp Zaurus SL-C series</a></li>
+  <li><a href="http://noir.s7.xrea.com/rubyqte/?%A5%A4%A5%F3%A5%B9%A5%C8%A1%BC%A5%EB">Ruby/Qte普及委員会</a></li>
+  <li><a href="http://slzaurus.seesaa.net/article/12561595.html">ザウルスのある生活 / Life with Zaurus</a></li>
+  <li><a href="http://memn0ck.com/d/LinuxZaurus%252fQCop.html">LinuxZaurus/QCop</a></li>
+  <li><a href="http://digit.que.ne.jp/visit/index.cgi?Linux%A5%B6%A5%A6%A5%EB%A5%B9%2FOpie-sh-HowTo">Linuxザウルス/Opie-sh-HowTo</a></li>
+  <li><a href=""></a></li>
+</ul>
+
+<hr>
+<p>
+<a href="../index.html">▲Zaurus Top</a> |
+<a href="../index.html#config">↑Up(設定・システム)</a> |
+<a href="gmail.html">←Prev(qtmail で Gmail(imap)を使う)</a> |
+<a href="">→Next()</a></p>
+<hr>
+<a href="/~nkon/mailform.html">近藤靖浩</a>
+</BODY></HTML>

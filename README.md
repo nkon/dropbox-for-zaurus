@@ -38,6 +38,5 @@ README.md    This file.
 d4z.rb       Main script file.
 d4z.json     Cache file of server information.
 dropbox_sdk.rb   Dropbox sdk downloaded from https://www.dropbox.com/developers
-sync.sh
 dropbox_opie.sh
 dropbox.desktop

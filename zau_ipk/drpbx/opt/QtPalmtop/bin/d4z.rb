@@ -60,7 +60,6 @@ class DropboxCLI
 
     @session.set_access_token(ACCESS_TOKEN, ACCESS_SECRET)
     if @session.authorized?
-      puts "already logged in!"
       puts "You are logged in.  Your access token key is #{@session.access_token.key} your secret is #{@session.access_token.secret}"
     end
     @client = DropboxClient.new(@session, ACCESS_TYPE)
@@ -236,6 +235,7 @@ class DropboxCLI
     puts "commands are: login #{LOGIN_REQUIRED.join(' ')} help exit"
   end
 
+  # load cached server information to @info_cache
   def load_info(command)
     path = command[1] || SERVER_INFO_FILE
     @info_cache = JSON.parse(File.read(path))
@@ -247,12 +247,12 @@ class DropboxCLI
     @info_cache = {"/" => {"path" => "/", "hash" => "", "contents" => [] }}
     pp @info_cache if $debug_flag
   else
-    puts "#{SERVER_INFO_FILE} is loaded."
+    puts "#{SERVER_INFO_FILE} is loaded." if $debug_flag
   end
 
   def save_info(command)
-    @info_cache.merge @info_delta
-    @info_cache.merge @info_server
+    @info_cache.merge! @info_delta
+    @info_cache.merge! @info_server
     path = command[1] || SERVER_INFO_FILE
     File.open(path, 'w'){|f|
       f.puts JSON.generate(@info_cache)
@@ -260,10 +260,17 @@ class DropboxCLI
     puts "#{SERVER_INFO_FILE} is saved."
   end
 
+  # get full information from server
+  # @info_server is cleared and set information
   def get_info(command)
     path = command[1] || "/"
     @info_server = Hash.new
     get_info_directory(path)
+
+    t = Time.now
+    @info_cache["last_info"] = t.to_i
+    @info_cache["last_info_t"] = t.to_s
+
     pp @info_server if $debug_flag
   end
 
@@ -301,6 +308,7 @@ class DropboxCLI
     end   # if resp['contents'].length > 0
   end
 
+  # get local information to @info_local
   def get_local(command)
     path = command[1] || path_remote_to_local("/")
     @info_local = Hash.new
@@ -309,7 +317,7 @@ class DropboxCLI
   end
 
   def get_local_directory(path)
-    puts "get_local_directory(#{path})"
+    puts "get_local_directory(#{path})" if $debug_flag
 
     app_path = path_local_to_remote(path)
 
@@ -340,79 +348,125 @@ class DropboxCLI
     }
   end
 
+  def delta(command)
+    arg_cursor = clean_up(command[1])
+    @cursor = nil unless(@cursor)
+    @cursor = arg_cursor if (arg_cursor)
+
+    puts "delta: cursor => #{@cursor}"
+    while
+      resp = @client.delta(@cursor)
+      pp resp
+
+      @cursor = resp["cursor"]
+
+      if resp["reset"]
+        puts "delta require RESET cached information."
+        @info_cache = Hash.new
+      end
+
+      resp["entries"].each{|item|
+        next unless item[1]
+        path = item[0]
+        metadata = item[1]
+        path = append_slash(path) if item[1]['is_dir']
+        metadata['path'] = append_slash(metadata['path']) if item[1]['is_dir']
+        @info_delta[path.downcase] = {
+          'path'       => metadata['path'],
+          'is_dir'     => metadata['is_dir'],
+          'rev'        => metadata['rev'],
+          'modified'   => metadata['modified'],
+          'modified_t' => metadata['modified'] ? Time.parse(metadata['modified']).to_i : nil,
+          'hash'       => metadata['hash'],
+        }
+      }
+
+      break unless resp["has_more"]
+
+    end
+
+    @info_cache["cursor"] = @cursor
+
+    t = Time.now
+    @info_cache["last_delta"] = t.to_i
+    @info_cache["last_delta_t"] = t.to_s
+
+    pp @info_delta if $debug_flag
+  end
+
   def listup(command)
     files = (@info_local.keys + @info_server.keys + @info_cache.keys + @info_delta.keys).sort.uniq
-    pp files
+    pp files if $debug_flag
 
     @put_file = Array.new
     @get_file = Array.new
     @makedir = Array.new
     @md_local = Array.new
 
+    @info_merge = @info_cache.merge @info_delta
+    @info_merge.merge! @info_server
+
     files.each{|f|
       next if f == "/"
       next if f =~ /[^\ -\~]/  # not ASCII
       next if f =~ /\\/        # not "\"
+      next unless f =~ /^\//       # not ^/  => meta information
 
+      puts "check #{f}" if $debug_flag
       if f =~ /\/$/            # directory
-        if @info_local[f] and !@info_server[f]        # local dir is new
+        if @info_local[f] and !@info_merge[f]        # local dir is new
+          debug_listup(f,"local dir is new")
           @makedir.push @info_local[f]['path']
-        elsif !@info_local[f] and @info_server[f]     # server dir is new
-          @md_local.push @info_server[f]['path']
-        elsif !@info_local[f] and @info_delta[f]      # server dir is new
-          @md_local.push @info_delta[f]['path']
+        elsif !@info_local[f] and @info_merge[f]     # server dir is new
+          debug_listup(f,"server dir is new")
+          @md_local.push @info_merge[f]['path']
         end
 
       else                     # file
-        if @info_local[f] and !@info_server[f] and !@info_delta[f]  # local file is new
+        if @info_local[f] and !@info_merge[f]        # local file is new
+          debug_listup(f,"local file is new")
           @put_file.push @info_local[f]['path']
-        elsif !@info_local[f] and @info_server[f]     # server file is new
-          @get_file.push @info_server[f]['path']
-        elsif !@info_local[f] and @info_delta[f]      # server file is new
-          @get_file.push @info_delta[f]['path']
-        elsif @info_local[f] and @info_server[f]
-          puts "file:#{f}"
-          puts "local:#{@info_local[f]['modified_t']} server:#{@info_server[f]['modified_t']}"
-          puts "local:#{@info_local[f]['modified']} server:#{@info_server[f]['modified']}"
-
-          if @info_local[f]['modified_t'] == @info_server[f]['modified_t']
+        elsif !@info_local[f] and @info_merge[f]     # server file is new
+          debug_listup(f,"server file is new")
+          @get_file.push @info_merge[f]['path']
+        elsif @info_local[f] and @info_merge[f]
+          if @info_local[f]['modified_t'] == @info_merge[f]['modified_t']
             next
 
           # local is newer
-          elsif @info_local[f]['modified_t'] > @info_server[f]['modified_t']
+          elsif @info_local[f]['modified_t'] > @info_merge[f]['modified_t']
+            debug_listup(f,"local is newer")
             @put_file.push @info_local[f]['path']
 
           # server is newer
-          elsif @info_local[f]['modified_t'] < @info_server[f]['modified_t']
-            @get_file.push @info_server[f]['path']
-          end
-        elsif @info_local[f] and @info_delta[f]
-          puts "file:#{f}"
-          puts "local:#{@info_local[f]['modified_t']} delta:#{@info_delta[f]['modified_t']}"
-
-          if @info_local[f]['modified_t'] == @info_delta[f]['modified_t']
-            next
-
-          # local is newer
-          elsif @info_local[f]['modified_t'] > @info_delta[f]['modified_t']
-            @put_file.push @info_local[f]['path']
-
-          # server is newer
-          elsif @info_local[f]['modified_t'] < @info_delta[f]['modified_t']
-            @get_file.push @info_server[f]['path']
+          elsif @info_local[f]['modified_t'] < @info_merge[f]['modified_t']
+            debug_listup(f,"server is newer")
+            @get_file.push @info_merge[f]['path']
           end
         end
       end
     }
 
-    puts "@put_file"
-    pp @put_file
-    puts "@get_file"
-    pp @get_file
-    puts "@makedir"
-    pp @makedir
-    puts "@md_local"
-    pp @md_local
+    if $debug_flag
+      puts "@put_file"
+      pp @put_file
+      puts "@get_file"
+      pp @get_file
+      puts "@makedir"
+      pp @makedir
+      puts "@md_local"
+      pp @md_local
+    end
+  end
+
+  def debug_listup(f,str)
+    return unless $debug_flag
+    puts str
+    pp "local", @info_local[f] if @info_local[f]
+    pp "merge", @info_merge[f] if @info_merge[f]
+    pp "server", @info_server[f] if @info_server[f]
+    pp "cache", @info_cache[f] if @info_cache[f]
+    pp "delta", @info_delta[f] if @info_delta[f]
   end
 
   def do_sync(command)
@@ -422,7 +476,7 @@ class DropboxCLI
       "makedir"  => true,
       "put_file" => true,
     } if command.is_a? Array
-    pp command
+    pp command if $debug_flag
 
     @md_local.each{|f|
       puts "do_sync: @md_local(#{f})"
@@ -434,15 +488,20 @@ class DropboxCLI
     @get_file.each{|f|
       puts "do_sync: @get_file(#{f})"
       src = clean_up(f)
-      out, metadata = @client.get_file_and_metadata('/' + src)
-      puts "Metadata:"
-      pp metadata if $debug_flag
-      dst = path_remote_to_local(src)
-      open(dst, 'w'){|f| f.puts out}
+      begin
+        out, metadata = @client.get_file_and_metadata('/' + src)
+      rescue DropboxError => e
+        pp e
+      else
+        puts "Metadata:"
+        pp metadata if $debug_flag
+        dst = path_remote_to_local(src)
+        open(dst, 'w'){|f| f.puts out}
 
-      puts "get #{src} #{dst}"
-      t = Time.parse(metadata['modified'])
-      File::utime(t,t,dst)
+        puts "get #{src} #{dst}"
+        t = Time.parse(metadata['modified'])
+        File::utime(t,t,dst)
+      end
     } if (command["get_file"])
 
     @makedir.each{|f|
@@ -460,39 +519,10 @@ class DropboxCLI
       pp @client.put_file(dst, open(src), true)  ## overrite=true
     } if (command["put_file"])
 
+    t = Time.now
+    @info_cache["last_sync"] = t.to_i
+    @info_cache["last_sync_t"] = t.to_s
   end
-
-  def delta(command)
-    arg_cursor = clean_up(command[1])
-    @cursor = nil unless(@cursor)
-    @cursor = arg_cursor if (arg_cursor)
-
-    puts "delta: cursor => #{@cursor}"
-    while
-      resp = @client.delta(@cursor)
-      pp resp
-      @cursor = resp["cursor"]
-      resp["entries"].each{|item|
-        next unless item[1]
-        path = item[0]
-        metadata = item[1]
-        path = append_slash(path) if item[1]['is_dir']
-        metadata['path'] = append_slash(metadata['path']) if item[1]['is_dir']
-        @info_delta[path.downcase] = {
-          'path'       => metadata['path'],
-          'is_dir'     => metadata['is_dir'],
-          'rev'        => metadata['rev'],
-          'modified'   => metadata['modified'],
-          'modified_t' => metadata['modified'] ? Time.parse(metadata['modified']).to_i : nil,
-          'hash'       => metadata['hash'],
-        }
-      }
-      break unless resp["has_more"]
-    end
-    @info_cache["cursor"] = @cursor
-    pp @info_delta if $debug_flag
-  end
-
 
   # remove the head-slash
   def clean_up(str)
@@ -585,7 +615,7 @@ elsif (OPT['u'])
   cli.login
   cli.load_info []
   cli.get_local []
-  cli.get_info []
+  cli.delta []
   cli.listup []
   cli.do_sync({"makedir" => true, "put_file" => true})
   cli.save_info []
@@ -594,7 +624,7 @@ elsif (OPT['s'])
   cli.login
   cli.load_info []
   cli.get_local []
-  cli.get_info []
+  cli.delta []
   cli.listup []
   cli.do_sync({"md_local" => true, "makedir" => true, "get_file" => true, "put_file" => true})
   cli.save_info []
