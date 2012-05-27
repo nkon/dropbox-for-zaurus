@@ -23,10 +23,11 @@ ACCESS_TYPE = :app_folder
 
 STRFTIME_RFC2616 = "%a, %d %b %Y %H:%M:%S %z"    # httpdate
 
-Version = "0.0.1"   # dropbox client for zaursu version
+Version = "0.1.2"   # dropbox client for zaursu version
+CONNECTION_WAIT = 60
 
 class DropboxCLI
-  LOGIN_REQUIRED = %w{put get getsp cp mv rm ls lsr mkdir info logout search thumbnail load_info save_info get_info get_local listup do_sync delta}
+  LOGIN_REQUIRED = %w{put get getsp cp mv rm ls lsr mkdir info logout search thumbnail wait_connect load_info save_info get_info get_local listup do_sync delta}
 
   def initialize
     if APP_KEY == '' or APP_SECRET == ''
@@ -234,6 +235,29 @@ class DropboxCLI
 
   def help
     puts "commands are: login #{LOGIN_REQUIRED.join(' ')} help exit"
+  end
+
+  # wait_connect argumeted second
+  def wait_connect(command)
+    if command[1]
+      time = command[1].to_i
+    else
+      time = 10
+    end
+    time.times{|t|
+      begin
+        p t if $debug_flag
+        if resp = @client.account_info
+          pp resp if $debug_flag
+          return
+        end
+      rescue => e
+        pp e if $debug_flag
+        sleep 1
+      end
+    }
+    puts "Can not connect to server."
+    exit
   end
 
   # load cached server information to @info_cache
@@ -633,6 +657,7 @@ elsif (OPT['d'])
   cli.login
   cli.load_info []
   cli.get_local []
+  cli.wait_connect [nil, CONNECTION_WAIT]
   cli.delta []
   cli.listup []
   cli.do_sync({"md_local" => true, "get_file" => true})
@@ -642,6 +667,7 @@ elsif (OPT['u'])
   cli.login
   cli.load_info []
   cli.get_local []
+  cli.wait_connect [nil, CONNECTION_WAIT]
   cli.delta []
   cli.listup []
   cli.do_sync({"makedir" => true, "put_file" => true})
@@ -651,6 +677,7 @@ elsif (OPT['s'])
   cli.login
   cli.load_info []
   cli.get_local []
+  cli.wait_connect [nil, CONNECTION_WAIT]
   cli.delta []
   cli.listup []
   cli.do_sync({"md_local" => true, "makedir" => true, "get_file" => true, "put_file" => true})
@@ -658,6 +685,7 @@ elsif (OPT['s'])
   exit
 elsif (OPT['a'])
   cli.login
+  cli.wait_connect [nil, CONNECTION_WAIT]
   cli.get_info []
   cli.save_info []
   exit

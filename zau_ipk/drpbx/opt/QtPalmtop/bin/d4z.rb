@@ -23,10 +23,11 @@ ACCESS_TYPE = :app_folder
 
 STRFTIME_RFC2616 = "%a, %d %b %Y %H:%M:%S %z"    # httpdate
 
-Version = "0.0.1"   # dropbox client for zaursu version
+Version = "0.1.2"   # dropbox client for zaursu version
+CONNECTION_WAIT = 60
 
 class DropboxCLI
-  LOGIN_REQUIRED = %w{put get getsp cp mv rm ls lsr mkdir info logout search thumbnail load_info save_info get_info get_local listup do_sync delta}
+  LOGIN_REQUIRED = %w{put get getsp cp mv rm ls lsr mkdir info logout search thumbnail wait_connect load_info save_info get_info get_local listup do_sync delta}
 
   def initialize
     if APP_KEY == '' or APP_SECRET == ''
@@ -41,6 +42,7 @@ class DropboxCLI
     @info_server = Hash.new
     @info_cache = Hash.new
     @info_delta = Hash.new
+    @info_deleted = Hash.new
     @put_file = Array.new
     @get_file = Array.new
     @makedir = Array.new
@@ -235,6 +237,29 @@ class DropboxCLI
     puts "commands are: login #{LOGIN_REQUIRED.join(' ')} help exit"
   end
 
+  # wait_connect argumeted second
+  def wait_connect(command)
+    if command[1]
+      time = command[1].to_i
+    else
+      time = 10
+    end
+    time.times{|t|
+      begin
+        p t if $debug_flag
+        if resp = @client.account_info
+          pp resp if $debug_flag
+          return
+        end
+      rescue => e
+        pp e if $debug_flag
+        sleep 1
+      end
+    }
+    puts "Can not connect to server."
+    exit
+  end
+
   # load cached server information to @info_cache
   def load_info(command)
     path = command[1] || SERVER_INFO_FILE
@@ -253,6 +278,7 @@ class DropboxCLI
   def save_info(command)
     @info_cache.merge! @info_delta
     @info_cache.merge! @info_server
+    @info_deleted.each_key{|key| @info_cache.delete(key) }
     path = command[1] || SERVER_INFO_FILE
     File.open(path, 'w'){|f|
       f.puts JSON.generate(@info_cache)
@@ -265,6 +291,7 @@ class DropboxCLI
   def get_info(command)
     path = command[1] || "/"
     @info_server = Hash.new
+    @info_deleted = Hash.new
     get_info_directory(path)
 
     t = Time.now
@@ -353,6 +380,12 @@ class DropboxCLI
     @cursor = nil unless(@cursor)
     @cursor = arg_cursor if (arg_cursor)
 
+    # cache is lost
+    if (!@info_cache["last_info"] and !@info_cache["last_delta"])
+      get_info []
+      return
+    end
+
     puts "delta: cursor => #{@cursor}"
     while
       resp = @client.delta(@cursor)
@@ -366,19 +399,24 @@ class DropboxCLI
       end
 
       resp["entries"].each{|item|
-        next unless item[1]
-        path = item[0]
-        metadata = item[1]
-        path = append_slash(path) if item[1]['is_dir']
-        metadata['path'] = append_slash(metadata['path']) if item[1]['is_dir']
-        @info_delta[path.downcase] = {
-          'path'       => metadata['path'],
-          'is_dir'     => metadata['is_dir'],
-          'rev'        => metadata['rev'],
-          'modified'   => metadata['modified'],
-          'modified_t' => metadata['modified'] ? Time.parse(metadata['modified']).to_i : nil,
-          'hash'       => metadata['hash'],
-        }
+        if item[1]          # item is modified
+          path = item[0]
+          metadata = item[1]
+          path = append_slash(path) if item[1]['is_dir']
+          metadata['path'] = append_slash(metadata['path']) if item[1]['is_dir']
+          @info_delta[path.downcase] = {
+            'path'       => metadata['path'],
+            'is_dir'     => metadata['is_dir'],
+            'rev'        => metadata['rev'],
+            'modified'   => metadata['modified'],
+            'modified_t' => metadata['modified'] ? Time.parse(metadata['modified']).to_i : nil,
+            'hash'       => metadata['hash'],
+          }
+        else                # item is deleted
+          path = item[0]
+          @info_delta[path.downcase] = nil
+          @info_deleted[path.downcase] = true
+        end
       }
 
       break unless resp["has_more"]
@@ -392,6 +430,7 @@ class DropboxCLI
     @info_cache["last_delta_t"] = t.to_s
 
     pp @info_delta if $debug_flag
+    pp @info_deleted if $debug_flag
   end
 
   def listup(command)
@@ -403,7 +442,8 @@ class DropboxCLI
     @makedir = Array.new
     @md_local = Array.new
 
-    @info_merge = @info_cache.merge @info_delta
+    @info_merge = @info_cache
+    @info_merge.merge! @info_delta
     @info_merge.merge! @info_server
 
     files.each{|f|
@@ -413,6 +453,12 @@ class DropboxCLI
       next unless f =~ /^\//       # not ^/  => meta information
 
       puts "check #{f}" if $debug_flag
+
+      if @info_deleted[f]
+        puts "#{f} is deleted on server."
+        next
+      end
+
       if f =~ /\/$/            # directory
         if @info_local[f] and !@info_merge[f]        # local dir is new
           debug_listup(f,"local dir is new")
@@ -467,6 +513,7 @@ class DropboxCLI
     pp "server", @info_server[f] if @info_server[f]
     pp "cache", @info_cache[f] if @info_cache[f]
     pp "delta", @info_delta[f] if @info_delta[f]
+    pp "deleted", @info_deleted[f] if @info_deleted[f]
   end
 
   def do_sync(command)
@@ -572,6 +619,10 @@ opt.on('-s', 'Syncronus(upload and download)') {|v|
   p 'Syncronus(upload and download)'
   OPT['s'] = true
 }
+opt.on('-a', 'Retrive all server information') {|v|
+  p 'Retrive all server information(metadata)'
+  OPT['a'] = true
+}
 
 opt.on_tail("--debug", "Show verbose debug output") do
   p "Show verbose debug output"
@@ -606,6 +657,7 @@ elsif (OPT['d'])
   cli.login
   cli.load_info []
   cli.get_local []
+  cli.wait_connect [nil, CONNECTION_WAIT]
   cli.delta []
   cli.listup []
   cli.do_sync({"md_local" => true, "get_file" => true})
@@ -615,6 +667,7 @@ elsif (OPT['u'])
   cli.login
   cli.load_info []
   cli.get_local []
+  cli.wait_connect [nil, CONNECTION_WAIT]
   cli.delta []
   cli.listup []
   cli.do_sync({"makedir" => true, "put_file" => true})
@@ -624,9 +677,16 @@ elsif (OPT['s'])
   cli.login
   cli.load_info []
   cli.get_local []
+  cli.wait_connect [nil, CONNECTION_WAIT]
   cli.delta []
   cli.listup []
   cli.do_sync({"md_local" => true, "makedir" => true, "get_file" => true, "put_file" => true})
+  cli.save_info []
+  exit
+elsif (OPT['a'])
+  cli.login
+  cli.wait_connect [nil, CONNECTION_WAIT]
+  cli.get_info []
   cli.save_info []
   exit
 else

@@ -1,6 +1,6 @@
 Package: drpbx
 Installed-Size:
-Version: 0.1.1
+Version: 0.1.2
 Depends: opie-sh,ruby
 Priority: optional
 Section: network/tools

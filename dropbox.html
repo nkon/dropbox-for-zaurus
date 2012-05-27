@@ -23,7 +23,7 @@
 <h3>d4z</h3>
 <p>できあがったものは ipkg にまとめてあるが、これは 'development status' なので、使うためにいろいろと登録作業が必要。</p>
 <ul>
-  <li><a href="../mysoft/drpbx_0.1.1_arm.ipk">drpbx_0.1.1_arm.ipk</a>をダウンロードして、インストールする。</li>
+  <li><a href="../mysoft/drpbx_0.1.2_arm.ipk">drpbx_0.1.2_arm.ipk</a>をダウンロードして、インストールする。</li>
   <li>OPIE-SH と ruby と OpenSSL が必要なのでどこかで探してくる。私が使っているバージョンは opie-sh_0.5.1-20020527_arm.ipk と ruby_1.7.8-1_arm.ipk と openssl_0.9.6m-1_arm.ipk。ruby_1.7.8 に適合するのは、ruby-qte_0.5.4_arm.ipk と db_4.2.52-2_arm.ipk。</li>
   <li>ruby のライブラリである、dropbox_sdk.rb, json ライブラリ、oauth ライブラリは同梱されている。zaurus は iconv 関係が壊れているので、json ライブラリを修正してある。副作用として、<strong>日本語ファイル名には対応していない</strong>。</li>
   <li>ホームディレクトリに d4z_keys.rb というファイルを作る。<pre>
@@ -79,6 +79,8 @@ Usage: d4z [options]
 
 <h3>Change Logs</h3>
 <dl>
+  <dt>0.1.2(2012-05-27)</dt>
+  <dd>d4z.rb: wait_connection でネットワークが開通するまで待つことにした。</dd>
   <dt>0.1.1(2012-05-26)</dt>
   <dd>d4z.rb: ログ出力の多くをデバッグオプションのときのみにした。get_file で、サーバのファイルが無いときに例外が生じるのをレスキューした。<br>-a オプション(サーバ情報をすべて入手する)を追加した。</dd>
   <dt>0.1.0(2012-05-20)</dt>
