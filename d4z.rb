@@ -506,8 +506,8 @@ class DropboxCLI
   end
 
   def debug_listup(f,str)
-    return unless $debug_flag
     puts str
+#    return unless $debug_flag
     pp "local", @info_local[f] if @info_local[f]
     pp "merge", @info_merge[f] if @info_merge[f]
     pp "server", @info_server[f] if @info_server[f]
